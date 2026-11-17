@@ -16,7 +16,12 @@ Desde PowerShell, en la carpeta del proyecto:
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python -c 'from pathlib import Path; import secrets; Path(".env").write_text("SECRET_KEY=" + secrets.token_hex(32) + chr(10), encoding="utf-8")'
 ```
+
+El último comando crea una `SECRET_KEY` aleatoria de 64 caracteres en `.env`,
+archivo excluido de Git. Genera una clave propia para cada entorno; no la
+compartas ni la subas al repositorio.
 
 La aplicación crea las tablas que falten al iniciar. También puedes
 inicializarlas manualmente:
