@@ -39,6 +39,21 @@
                     <input class="form-control" id="fecha_limite" name="fecha_limite" type="date"
                            value="{{ tarea.fecha_limite.isoformat() if tarea and tarea.fecha_limite else '' }}">
                 </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="horas_estimadas">Horas planificadas</label>
+                    <input class="form-control" id="horas_estimadas" name="horas_estimadas"
+                           type="number" min="0" max="99999.99" step="0.01"
+                           value="{{ tarea.horas_estimadas if tarea else '0.00' }}">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="fase_id">Fase del proyecto</label>
+                    <select class="form-select" id="fase_id" name="fase_id">
+                        <option value="">Sin fase</option>
+                        {% for fase in fases %}
+                        <option value="{{ fase.id }}" {% if tarea and tarea.fase_id == fase.id %}selected{% endif %}>{{ fase.orden }}. {{ fase.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
                 <div class="col-12">
                     <label class="form-label" for="asignado_a_id">Asignar a</label>
                     <select class="form-select" id="asignado_a_id" name="asignado_a_id">
@@ -58,4 +73,3 @@
     </div>
 </div>
 {% endblock %}
-
