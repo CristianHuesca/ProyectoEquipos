@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar' if fase else 'Nueva' }} fase | DevProject Manager{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <p class="eyebrow mb-2">{{ proyecto.nombre }} · EDT / WBS</p>
+        <h1 class="h2 mb-4">{{ 'Editar fase' if fase else 'Nueva fase o hito' }}</h1>
+        <form method="POST" class="card p-4 p-md-5">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label" for="nombre">Nombre de la fase</label>
+                <input class="form-control" id="nombre" name="nombre" maxlength="120" required
+                       value="{{ fase.nombre if fase else '' }}" placeholder="Ej. Diseño y prototipado">
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="descripcion">Entregables o descripción</label>
+                <textarea class="form-control" id="descripcion" name="descripcion" rows="3" maxlength="2000">{{ fase.descripcion if fase else '' }}</textarea>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label" for="orden">Orden</label>
+                    <input class="form-control" id="orden" name="orden" type="number" step="1"
+                           value="{{ fase.orden if fase else (proyecto.fases|length + 1) }}">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="fecha_inicio">Fecha de inicio</label>
+                    <input class="form-control" id="fecha_inicio" name="fecha_inicio" type="date"
+                           value="{{ fase.fecha_inicio.isoformat() if fase and fase.fecha_inicio else '' }}">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="fecha_fin">Fecha de término</label>
+                    <input class="form-control" id="fecha_fin" name="fecha_fin" type="date"
+                           value="{{ fase.fecha_fin.isoformat() if fase and fase.fecha_fin else '' }}">
+                </div>
+            </div>
+            <div class="d-flex gap-2 mt-4">
+                <button class="btn btn-primary">Guardar fase</button>
+                <a class="btn btn-outline-secondary" href="{{ url_for('proyecto_detalle', project_id=proyecto.id) }}">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -43,6 +43,20 @@ símbolo. Crea la cuenta con:
 python -m flask --app app seed-admin
 ```
 
+Si ya existe la cuenta pero no recuerdas la contraseña o está desactivada,
+ejecuta el comando de recuperación. Puedes indicar el correo que quieres
+recuperar para no depender de `ADMIN_EMAIL`; en ese caso, te pedirá la contraseña
+nueva de forma oculta:
+
+```powershell
+python -m flask --app app restaurar-admin manager@ejemplo.com
+```
+
+Después inicia sesión con el correo indicado y la nueva contraseña. Sin indicar
+un correo, el comando usa `ADMIN_EMAIL` y `ADMIN_PASSWORD` de `.env` (o solicita
+una contraseña nueva si la configurada no cumple la política). El comando nunca
+muestra la contraseña en pantalla.
+
 ## Ejecutar la aplicación
 
 ```powershell
@@ -64,3 +78,14 @@ producción debe configurarse un servicio de correo y un servidor WSGI.
 
 Los clientes y desarrolladores solo pueden acceder a los proyectos a los que
 están asignados. Las operaciones que modifican datos requieren token CSRF.
+
+## Gestión de proyectos y tareas
+
+- Los proyectos incluyen objetivos, fechas, presupuesto, estado y equipo con un
+  rol específico por integrante.
+- Cada proyecto puede dividirse en fases o hitos ordenados, con entregables y
+  fechas; las tareas pueden asociarse a una fase.
+- Las tareas se filtran por estado, responsable y fase. Su formulario registra
+  horas planificadas, mientras que los integrantes reportan las horas reales.
+- Al iniciar, la aplicación agrega de forma compatible las columnas nuevas a la
+  base SQLite existente y conserva proyectos, tareas y reportes previos.
