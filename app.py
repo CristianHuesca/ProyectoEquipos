@@ -18,6 +18,7 @@ from flask_login import (
 )
 from flask_wtf.csrf import CSRFProtect
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from sqlalchemy import inspect
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import IntegrityError
 
@@ -60,13 +61,14 @@ ESTADOS_PROYECTO = {
     "planificacion": "Planificación",
     "activo": "Activo",
     "pausado": "Pausado",
-    "completado": "Completado",
+    "finalizado": "Finalizado",
 }
 
 ESTADOS_TAREA = {
-    "pendiente": "Pendiente",
+    "pendiente": "Por hacer",
     "en_progreso": "En progreso",
-    "completada": "Completada",
+    "en_revision": "En revisión",
+    "completada": "Concluida",
 }
 
 
@@ -92,6 +94,7 @@ class Proyecto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nombre = db.Column(db.String(120), nullable=False)
     descripcion = db.Column(db.Text, nullable=False, default="")
+    objetivos = db.Column(db.Text, nullable=False, default="")
     presupuesto = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     estado = db.Column(db.String(20), nullable=False, default="planificacion")
     fecha_inicio = db.Column(db.Date, nullable=True)
@@ -105,6 +108,12 @@ class Proyecto(db.Model):
         "MiembroProyecto",
         back_populates="proyecto",
         cascade="all, delete-orphan",
+    )
+    fases = db.relationship(
+        "Fase",
+        back_populates="proyecto",
+        cascade="all, delete-orphan",
+        order_by="Fase.orden, Fase.id",
     )
     tareas = db.relationship(
         "Tarea",
@@ -120,6 +129,7 @@ class MiembroProyecto(db.Model):
         db.Integer, db.ForeignKey("proyecto.id"), nullable=False
     )
     usuario_id = db.Column(db.Integer, db.ForeignKey("usuario.id"), nullable=False)
+    rol_equipo = db.Column(db.String(80), nullable=False, default="Desarrollo")
     proyecto = db.relationship("Proyecto", back_populates="miembros")
     usuario = db.relationship("Usuario", backref="asignaciones_proyecto")
     __table_args__ = (
@@ -127,21 +137,36 @@ class MiembroProyecto(db.Model):
     )
 
 
+class Fase(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    proyecto_id = db.Column(db.Integer, db.ForeignKey("proyecto.id"), nullable=False)
+    nombre = db.Column(db.String(120), nullable=False)
+    descripcion = db.Column(db.Text, nullable=False, default="")
+    orden = db.Column(db.Integer, nullable=False, default=0)
+    fecha_inicio = db.Column(db.Date, nullable=True)
+    fecha_fin = db.Column(db.Date, nullable=True)
+    proyecto = db.relationship("Proyecto", back_populates="fases")
+    tareas = db.relationship("Tarea", back_populates="fase")
+
+
 class Tarea(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     proyecto_id = db.Column(
         db.Integer, db.ForeignKey("proyecto.id"), nullable=False
     )
+    fase_id = db.Column(db.Integer, db.ForeignKey("fase.id"), nullable=True)
     asignado_a_id = db.Column(db.Integer, db.ForeignKey("usuario.id"), nullable=True)
     titulo = db.Column(db.String(140), nullable=False)
     descripcion = db.Column(db.Text, nullable=False, default="")
     estado = db.Column(db.String(20), nullable=False, default="pendiente")
     prioridad = db.Column(db.String(20), nullable=False, default="normal")
+    horas_estimadas = db.Column(db.Numeric(7, 2), nullable=False, default=0)
     fecha_limite = db.Column(db.Date, nullable=True)
     creado_en = db.Column(
         db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     proyecto = db.relationship("Proyecto", back_populates="tareas")
+    fase = db.relationship("Fase", back_populates="tareas")
     asignado_a = db.relationship("Usuario", backref="tareas_asignadas")
     registros_horas = db.relationship(
         "RegistroHoras",
@@ -162,8 +187,46 @@ class RegistroHoras(db.Model):
     usuario = db.relationship("Usuario", backref="registros_horas")
 
 
-with app.app_context():
+def actualizar_esquema():
     db.create_all()
+    cambios = (
+        (
+            "proyecto",
+            "objetivos",
+            "ALTER TABLE proyecto ADD COLUMN objetivos TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "miembro_proyecto",
+            "rol_equipo",
+            "ALTER TABLE miembro_proyecto ADD COLUMN rol_equipo "
+            "VARCHAR(80) NOT NULL DEFAULT 'Desarrollo'",
+        ),
+        ("tarea", "fase_id", "ALTER TABLE tarea ADD COLUMN fase_id INTEGER"),
+        (
+            "tarea",
+            "horas_estimadas",
+            "ALTER TABLE tarea ADD COLUMN horas_estimadas "
+            "NUMERIC(7, 2) NOT NULL DEFAULT 0",
+        ),
+    )
+    with db.engine.begin() as conexion:
+        for tabla, columna, sentencia in cambios:
+            columnas = {
+                item["name"] for item in inspect(conexion).get_columns(tabla)
+            }
+            if columna not in columnas:
+                conexion.exec_driver_sql(sentencia)
+        conexion.exec_driver_sql(
+            "UPDATE proyecto SET estado = 'finalizado' WHERE estado = 'completado'"
+        )
+        conexion.exec_driver_sql(
+            "UPDATE tarea SET estado = 'en_revision' "
+            "WHERE estado IN ('revision', 'en_revision')"
+        )
+
+
+with app.app_context():
+    actualizar_esquema()
 
 
 @login_manager.user_loader
@@ -382,8 +445,13 @@ def proyecto_nuevo():
     if request.method == "POST":
         nombre = request.form.get("nombre", "").strip()
         descripcion = request.form.get("descripcion", "").strip()
+        objetivos = request.form.get("objetivos", "").strip()
         estado = request.form.get("estado", "")
         miembros_ids = set(request.form.getlist("miembros", type=int))
+        roles_equipo = {
+            usuario_id: request.form.get(f"rol_miembro_{usuario_id}", "").strip()
+            for usuario_id in miembros_ids
+        }
 
         try:
             presupuesto = Decimal(request.form.get("presupuesto", "0"))
@@ -415,8 +483,14 @@ def proyecto_nuevo():
             error = "El nombre del proyecto es obligatorio y debe tener hasta 120 caracteres."
         elif not error and len(descripcion) > 4000:
             error = "La descripción debe tener hasta 4,000 caracteres."
+        elif not error and len(objetivos) > 4000:
+            error = "Los objetivos deben tener hasta 4,000 caracteres."
         elif not error and estado not in ESTADOS_PROYECTO:
             error = "Selecciona un estado válido."
+        elif not error and any(
+            not rol or len(rol) > 80 for rol in roles_equipo.values()
+        ):
+            error = "Define un rol de equipo de hasta 80 caracteres para cada integrante."
         elif not error and len(usuarios) != len(miembros_ids):
             error = "Solo puedes asignar miembros activos con rol de desarrollador o cliente."
         elif not error and (fecha_error or fin_error):
@@ -430,12 +504,19 @@ def proyecto_nuevo():
             proyecto = Proyecto(
                 nombre=nombre,
                 descripcion=descripcion,
+                objetivos=objetivos,
                 presupuesto=presupuesto,
                 estado=estado,
                 fecha_inicio=fecha_inicio,
                 fecha_fin=fecha_fin,
                 creador=current_user,
-                miembros=[MiembroProyecto(usuario=usuario) for usuario in usuarios],
+                miembros=[
+                    MiembroProyecto(
+                        usuario=usuario,
+                        rol_equipo=roles_equipo[usuario.id],
+                    )
+                    for usuario in usuarios
+                ],
             )
             db.session.add(proyecto)
             db.session.commit()
@@ -461,8 +542,13 @@ def proyecto_editar(project_id):
     if request.method == "POST":
         nombre = request.form.get("nombre", "").strip()
         descripcion = request.form.get("descripcion", "").strip()
+        objetivos = request.form.get("objetivos", "").strip()
         estado = request.form.get("estado", "")
         miembros_ids = set(request.form.getlist("miembros", type=int))
+        roles_equipo = {
+            usuario_id: request.form.get(f"rol_miembro_{usuario_id}", "").strip()
+            for usuario_id in miembros_ids
+        }
 
         try:
             presupuesto = Decimal(request.form.get("presupuesto", "0"))
@@ -494,8 +580,14 @@ def proyecto_editar(project_id):
             error = "El nombre del proyecto es obligatorio y debe tener hasta 120 caracteres."
         elif not error and len(descripcion) > 4000:
             error = "La descripción debe tener hasta 4,000 caracteres."
+        elif not error and len(objetivos) > 4000:
+            error = "Los objetivos deben tener hasta 4,000 caracteres."
         elif not error and estado not in ESTADOS_PROYECTO:
             error = "Selecciona un estado válido."
+        elif not error and any(
+            not rol or len(rol) > 80 for rol in roles_equipo.values()
+        ):
+            error = "Define un rol de equipo de hasta 80 caracteres para cada integrante."
         elif not error and len(usuarios) != len(miembros_ids):
             error = "Solo puedes asignar miembros activos con rol de desarrollador o cliente."
         elif not error and (fecha_error or fin_error):
@@ -508,6 +600,7 @@ def proyecto_editar(project_id):
         else:
             proyecto.nombre = nombre
             proyecto.descripcion = descripcion
+            proyecto.objetivos = objetivos
             proyecto.presupuesto = presupuesto
             proyecto.estado = estado
             proyecto.fecha_inicio = fecha_inicio
@@ -521,7 +614,18 @@ def proyecto_editar(project_id):
                     proyecto.miembros.remove(miembro)
             for usuario in usuarios:
                 if usuario.id not in miembro_actual_ids:
-                    proyecto.miembros.append(MiembroProyecto(usuario=usuario))
+                    proyecto.miembros.append(
+                        MiembroProyecto(
+                            usuario=usuario,
+                            rol_equipo=roles_equipo[usuario.id],
+                        )
+                    )
+                else:
+                    asignacion = next(
+                        miembro for miembro in proyecto.miembros
+                        if miembro.usuario_id == usuario.id
+                    )
+                    asignacion.rol_equipo = roles_equipo[usuario.id]
             desarrollador_ids = {
                 usuario.id for usuario in usuarios
                 if usuario.rol == "desarrollador"
@@ -576,6 +680,77 @@ def proyecto_detalle(project_id):
     )
 
 
+@app.route("/proyectos/<int:project_id>/fases/nueva", methods=["GET", "POST"])
+@roles_requeridos("admin")
+def fase_nueva(project_id):
+    proyecto = db.get_or_404(Proyecto, project_id)
+    return guardar_fase(proyecto)
+
+
+@app.route("/fases/<int:phase_id>/editar", methods=["GET", "POST"])
+@roles_requeridos("admin")
+def fase_editar(phase_id):
+    fase = db.get_or_404(Fase, phase_id)
+    return guardar_fase(fase.proyecto, fase)
+
+
+def guardar_fase(proyecto, fase=None):
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        descripcion = request.form.get("descripcion", "").strip()
+        fecha_inicio, fecha_error = parsear_fecha(
+            request.form.get("fecha_inicio", ""), "de inicio"
+        )
+        fecha_fin, fin_error = parsear_fecha(
+            request.form.get("fecha_fin", ""), "de término"
+        )
+        try:
+            orden = int(request.form.get("orden", "0"))
+            error = None
+        except ValueError:
+            orden = 0
+            error = "El orden debe ser un número entero."
+
+        if not error and (not nombre or len(nombre) > 120):
+            error = "El nombre de la fase es obligatorio y debe tener hasta 120 caracteres."
+        elif not error and len(descripcion) > 2000:
+            error = "La descripción debe tener hasta 2,000 caracteres."
+        elif not error and (fecha_error or fin_error):
+            error = fecha_error or fin_error
+        elif not error and fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+            error = "La fecha de término no puede ser anterior a la fecha de inicio."
+
+        if error:
+            flash(error, "danger")
+        else:
+            if fase is None:
+                fase = Fase(proyecto=proyecto)
+                db.session.add(fase)
+            fase.nombre = nombre
+            fase.descripcion = descripcion
+            fase.orden = orden
+            fase.fecha_inicio = fecha_inicio
+            fase.fecha_fin = fecha_fin
+            db.session.commit()
+            flash("Fase guardada correctamente.", "success")
+            return redirect(url_for("proyecto_detalle", project_id=proyecto.id))
+
+    return render_template("fase_form.html", proyecto=proyecto, fase=fase)
+
+
+@app.route("/fases/<int:phase_id>/eliminar", methods=["POST"])
+@roles_requeridos("admin")
+def fase_eliminar(phase_id):
+    fase = db.get_or_404(Fase, phase_id)
+    proyecto_id = fase.proyecto_id
+    for tarea in fase.tareas:
+        tarea.fase = None
+    db.session.delete(fase)
+    db.session.commit()
+    flash("Fase eliminada. Las tareas relacionadas siguen en el proyecto.", "info")
+    return redirect(url_for("proyecto_detalle", project_id=proyecto_id))
+
+
 @app.route("/proyectos/<int:project_id>/tareas/nueva", methods=["GET", "POST"])
 @roles_requeridos("admin", "desarrollador")
 def tarea_nueva(project_id):
@@ -608,27 +783,45 @@ def guardar_tarea(proyecto, tarea=None):
         estado = request.form.get("estado", "pendiente")
         prioridad = request.form.get("prioridad", "normal")
         asignado_raw = request.form.get("asignado_a_id", "")
+        fase_raw = request.form.get("fase_id", "")
         fecha_limite, fecha_error = parsear_fecha(
             request.form.get("fecha_limite", ""), "de entrega"
         )
+        fase = next(
+            (fase for fase in proyecto.fases if str(fase.id) == fase_raw),
+            None,
+        ) if fase_raw else None
         asignado = next(
             (usuario for usuario in desarrolladores
              if str(usuario.id) == asignado_raw),
             None,
         ) if asignado_raw else None
-        error = None
+        try:
+            horas_estimadas = Decimal(request.form.get("horas_estimadas", "0"))
+            if (
+                not horas_estimadas.is_finite()
+                or horas_estimadas < 0
+                or horas_estimadas > Decimal("99999.99")
+            ):
+                raise InvalidOperation
+            error = None
+        except InvalidOperation:
+            horas_estimadas = Decimal("0")
+            error = "Las horas estimadas deben ser un número entre 0 y 99,999.99."
 
-        if not titulo or len(titulo) > 140:
+        if not error and (not titulo or len(titulo) > 140):
             error = "El título es obligatorio y debe tener hasta 140 caracteres."
-        elif estado not in ESTADOS_TAREA:
+        elif not error and estado not in ESTADOS_TAREA:
             error = "Selecciona un estado válido."
-        elif prioridad not in ("baja", "normal", "alta"):
+        elif not error and prioridad not in ("baja", "normal", "alta"):
             error = "Selecciona una prioridad válida."
-        elif asignado_raw and not asignado:
+        elif not error and asignado_raw and not asignado:
             error = "La persona asignada debe ser un desarrollador activo del proyecto."
-        elif len(descripcion) > 4000:
+        elif not error and fase_raw and not fase:
+            error = "La fase seleccionada debe pertenecer a este proyecto."
+        elif not error and len(descripcion) > 4000:
             error = "La descripción debe tener hasta 4,000 caracteres."
-        elif fecha_error:
+        elif not error and fecha_error:
             error = fecha_error
 
         if error:
@@ -641,7 +834,9 @@ def guardar_tarea(proyecto, tarea=None):
             tarea.descripcion = descripcion
             tarea.estado = estado
             tarea.prioridad = prioridad
+            tarea.horas_estimadas = horas_estimadas
             tarea.fecha_limite = fecha_limite
+            tarea.fase = fase
             tarea.asignado_a = asignado
             db.session.commit()
             flash("Tarea guardada correctamente.", "success")
@@ -653,7 +848,21 @@ def guardar_tarea(proyecto, tarea=None):
         tarea=tarea,
         estados=ESTADOS_TAREA,
         desarrolladores=desarrolladores,
+        fases=proyecto.fases,
     )
+
+
+@app.route("/tareas/<int:task_id>/eliminar", methods=["POST"])
+@roles_requeridos("admin", "desarrollador")
+def tarea_eliminar(task_id):
+    tarea = db.get_or_404(Tarea, task_id)
+    proyecto = obtener_proyecto_visible(tarea.proyecto_id)
+    if current_user.rol == "desarrollador" and not es_miembro_desarrollador(proyecto):
+        abort(403)
+    db.session.delete(tarea)
+    db.session.commit()
+    flash("Tarea eliminada.", "info")
+    return redirect(url_for("proyecto_detalle", project_id=proyecto.id))
 
 
 @app.route("/tareas/<int:task_id>/horas", methods=["POST"])
@@ -954,6 +1163,56 @@ def seed_admin():
     db.session.add(admin)
     db.session.commit()
     click.echo("Administrador creado correctamente.")
+
+
+@app.cli.command("restaurar-admin")
+@click.argument("email_objetivo", required=False)
+def restaurar_admin(email_objetivo=None):
+    """Restablece el administrador del archivo .env o del correo indicado."""
+    email_indicado = normalizar_email(email_objetivo) if email_objetivo else ""
+    email = email_indicado or normalizar_email(os.getenv("ADMIN_EMAIL", ""))
+    password = os.getenv("ADMIN_PASSWORD", "")
+    nombre = os.getenv("ADMIN_NAME", "Administrador")
+
+    if not email:
+        raise click.ClickException(
+            "Define ADMIN_EMAIL en .env o indica el correo del administrador."
+        )
+
+    usuario = Usuario.query.filter_by(email=email).first()
+    if usuario and usuario.rol != "admin":
+        raise click.ClickException(
+            "El correo indicado pertenece a una cuenta que no tiene rol de administrador."
+        )
+    if email_indicado and not usuario:
+        raise click.ClickException(
+            "No existe una cuenta administradora con ese correo. "
+            "Revisa el correo e inténtalo de nuevo."
+        )
+
+    error = validar_password(password) if not email_indicado else "prompt"
+    if error:
+        password = click.prompt(
+            "Nueva contraseña segura para el administrador",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+        error = validar_password(password)
+    if error:
+        raise click.ClickException(error)
+
+    if not usuario:
+        usuario = Usuario(nombre=nombre, email=email, rol="admin")
+        db.session.add(usuario)
+
+    usuario.nombre = nombre
+    usuario.activo = True
+    usuario.establecer_password(password)
+    db.session.commit()
+    click.echo(
+        f"Acceso de administrador restablecido para {email}. "
+        "Inicia sesión con esa cuenta y la contraseña nueva."
+    )
 
 
 @app.cli.command("crear-tablas")

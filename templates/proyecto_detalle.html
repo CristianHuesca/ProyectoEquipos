@@ -8,6 +8,12 @@
         <p class="eyebrow mt-3 mb-2">Proyecto · {{ proyecto.estado|replace('_', ' ')|title }}</p>
         <h1 class="h2 mb-2">{{ proyecto.nombre }}</h1>
         <p class="text-secondary mb-0">{{ proyecto.descripcion or 'Sin descripción disponible.' }}</p>
+        {% if proyecto.objetivos %}
+        <div class="project-objectives mt-3">
+            <span class="eyebrow d-block mb-1">Objetivos</span>
+            <p class="mb-0">{{ proyecto.objetivos }}</p>
+        </div>
+        {% endif %}
     </div>
     {% if es_admin %}
     <div class="d-flex gap-2">
@@ -39,6 +45,46 @@
     </div>
 </div>
 
+<section class="card p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+            <p class="eyebrow mb-1">Estructura de desglose del trabajo</p>
+            <h2 class="h4 mb-0">Fases e hitos</h2>
+        </div>
+        {% if es_admin %}
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('fase_nueva', project_id=proyecto.id) }}">＋ Agregar fase</a>
+        {% endif %}
+    </div>
+    <div class="row g-3">
+        {% for fase in proyecto.fases %}
+        <div class="col-md-6 col-xl-4">
+            <article class="phase-card h-100">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <span class="phase-number">{{ '%02d'|format(fase.orden) }}</span>
+                    {% if es_admin %}
+                    <div class="d-flex gap-1">
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fase_editar', phase_id=fase.id) }}">Editar</a>
+                        <form method="POST" action="{{ url_for('fase_eliminar', phase_id=fase.id) }}"
+                              onsubmit="return confirm('¿Eliminar esta fase? Las tareas se conservarán sin fase.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-danger">Eliminar</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+                <h3 class="h6 mt-3 mb-1">{{ fase.nombre }}</h3>
+                <p class="small text-secondary mb-2">{{ fase.descripcion or 'Sin descripción adicional.' }}</p>
+                <div class="small text-secondary">{{ fase.tareas|length }} tareas · {{ fase.fecha_inicio.strftime('%d/%m/%Y') if fase.fecha_inicio else 'Sin inicio' }} — {{ fase.fecha_fin.strftime('%d/%m/%Y') if fase.fecha_fin else 'Sin término' }}</div>
+            </article>
+        </div>
+        {% else %}
+        <div class="col-12">
+            <p class="text-secondary mb-0">Aún no se han definido fases para este proyecto.</p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+
 {% if current_user.rol == 'cliente' %}
 <div class="card p-4">
     <p class="eyebrow mb-2">Resumen para cliente</p>
@@ -61,25 +107,69 @@
             <a class="btn btn-primary btn-sm" href="{{ url_for('tarea_nueva', project_id=proyecto.id) }}">＋ Nueva tarea</a>
             {% endif %}
         </div>
+        <div class="card p-3 mb-3">
+            <div class="row g-2">
+                <div class="col-sm-4">
+                    <label class="form-label small mb-1" for="filtro-estado">Estado</label>
+                    <select class="form-select form-select-sm" id="filtro-estado">
+                        <option value="">Todos los estados</option>
+                        {% for clave, etiqueta in estados_tarea.items() %}
+                        <option value="{{ clave }}">{{ etiqueta }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-sm-4">
+                    <label class="form-label small mb-1" for="filtro-responsable">Responsable</label>
+                    <select class="form-select form-select-sm" id="filtro-responsable">
+                        <option value="">Todo el equipo</option>
+                        {% for miembro in proyecto.miembros if miembro.usuario.rol == 'desarrollador' %}
+                        <option value="{{ miembro.usuario_id }}">{{ miembro.usuario.nombre }}</option>
+                        {% endfor %}
+                        <option value="sin-asignar">Sin asignar</option>
+                    </select>
+                </div>
+                <div class="col-sm-4">
+                    <label class="form-label small mb-1" for="filtro-fase">Fase</label>
+                    <select class="form-select form-select-sm" id="filtro-fase">
+                        <option value="">Todas las fases</option>
+                        {% for fase in proyecto.fases %}
+                        <option value="{{ fase.id }}">{{ fase.nombre }}</option>
+                        {% endfor %}
+                        <option value="sin-fase">Sin fase</option>
+                    </select>
+                </div>
+            </div>
+        </div>
         <div class="d-grid gap-3">
             {% for tarea in proyecto.tareas %}
-            <article class="card p-4">
+            <article class="card p-4 task-card" data-task-card
+                     data-status="{{ tarea.estado }}"
+                     data-owner="{{ tarea.asignado_a_id if tarea.asignado_a_id else 'sin-asignar' }}"
+                     data-phase="{{ tarea.fase_id if tarea.fase_id else 'sin-fase' }}">
                 <div class="d-flex justify-content-between gap-3">
                     <div class="flex-grow-1">
                         <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                             <h3 class="h6 mb-0">{{ tarea.titulo }}</h3>
                             <span class="badge rounded-pill text-bg-light">{{ estados_tarea[tarea.estado] }}</span>
                             <span class="badge rounded-pill text-bg-light">Prioridad {{ tarea.prioridad }}</span>
+                            {% if tarea.fase %}<span class="badge rounded-pill text-bg-light">{{ tarea.fase.nombre }}</span>{% endif %}
                         </div>
                         <p class="small text-secondary mb-2">{{ tarea.descripcion or 'Sin descripción.' }}</p>
                         <div class="small text-secondary">
                             Asignada a {{ tarea.asignado_a.nombre if tarea.asignado_a else 'nadie' }}
-                            · {{ horas_de_tarea(tarea) }} horas reportadas
+                            · {{ horas_de_tarea(tarea) }} / {{ tarea.horas_estimadas }} h reales / planificadas
                             {% if tarea.fecha_limite %} · Entrega {{ tarea.fecha_limite.strftime('%d/%m/%Y') }}{% endif %}
                         </div>
                     </div>
                     {% if puede_trabajar %}
-                    <a class="btn btn-sm btn-outline-primary align-self-start" href="{{ url_for('tarea_editar', task_id=tarea.id) }}">Editar</a>
+                    <div class="d-flex gap-1 align-self-start">
+                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('tarea_editar', task_id=tarea.id) }}">Editar</a>
+                        <form method="POST" action="{{ url_for('tarea_eliminar', task_id=tarea.id) }}"
+                              onsubmit="return confirm('¿Eliminar esta tarea y sus registros de horas?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-danger">Eliminar</button>
+                        </form>
+                    </div>
                     {% endif %}
                 </div>
                 {% if current_user.rol == 'desarrollador' and tarea.asignado_a_id in [none, current_user.id] %}
@@ -120,6 +210,11 @@
                 <p class="text-secondary mb-0">Agrega la primera tarea para dar seguimiento al proyecto.</p>
             </div>
             {% endfor %}
+            {% if proyecto.tareas %}
+            <div class="card p-4 text-center text-secondary d-none" data-empty-filter>
+                No hay tareas que coincidan con estos filtros.
+            </div>
+            {% endif %}
         </div>
     </div>
     <div class="col-lg-4">
@@ -130,7 +225,7 @@
                 {% for miembro in proyecto.miembros %}
                 <li class="list-group-item px-0 d-flex justify-content-between gap-2">
                     <span>{{ miembro.usuario.nombre }}<small class="d-block text-secondary">{{ miembro.usuario.email }}</small></span>
-                    <span class="small text-secondary">{{ 'Desarrollador' if miembro.usuario.rol == 'desarrollador' else 'Cliente' }}</span>
+                    <span class="small text-secondary text-end">{{ miembro.rol_equipo }}<small class="d-block">{{ 'Desarrollador' if miembro.usuario.rol == 'desarrollador' else 'Cliente' }}</small></span>
                 </li>
                 {% else %}
                 <li class="list-group-item px-0 text-secondary">Sin integrantes asignados.</li>
@@ -144,4 +239,30 @@
     </div>
 </div>
 {% endif %}
+<script>
+    const taskCards = [...document.querySelectorAll("[data-task-card]")];
+    const statusFilter = document.getElementById("filtro-estado");
+    const ownerFilter = document.getElementById("filtro-responsable");
+    const phaseFilter = document.getElementById("filtro-fase");
+    const emptyFilter = document.querySelector("[data-empty-filter]");
+
+    function filterTasks() {
+        let visibleTasks = 0;
+        taskCards.forEach((card) => {
+            const matches =
+                (!statusFilter.value || card.dataset.status === statusFilter.value) &&
+                (!ownerFilter.value || card.dataset.owner === ownerFilter.value) &&
+                (!phaseFilter.value || card.dataset.phase === phaseFilter.value);
+            card.classList.toggle("d-none", !matches);
+            visibleTasks += Number(matches);
+        });
+        if (emptyFilter) {
+            emptyFilter.classList.toggle("d-none", visibleTasks !== 0);
+        }
+    }
+
+    [statusFilter, ownerFilter, phaseFilter].forEach((filter) => {
+        if (filter) filter.addEventListener("change", filterTasks);
+    });
+</script>
 {% endblock %}

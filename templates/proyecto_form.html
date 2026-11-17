@@ -29,6 +29,11 @@
                     <label class="form-label" for="descripcion">Descripción</label>
                     <textarea class="form-control" id="descripcion" name="descripcion" rows="3" maxlength="4000">{{ proyecto.descripcion if proyecto else '' }}</textarea>
                 </div>
+                <div class="col-12">
+                    <label class="form-label" for="objetivos">Objetivos del proyecto</label>
+                    <textarea class="form-control" id="objetivos" name="objetivos" rows="3" maxlength="4000"
+                              placeholder="¿Qué resultados debe alcanzar el equipo?">{{ proyecto.objetivos if proyecto else '' }}</textarea>
+                </div>
                 <div class="col-md-4">
                     <label class="form-label" for="presupuesto">Presupuesto (MXN)</label>
                     <div class="input-group">
@@ -48,15 +53,35 @@
                            value="{{ proyecto.fecha_fin.isoformat() if proyecto and proyecto.fecha_fin else '' }}">
                 </div>
                 <div class="col-12">
-                    <label class="form-label" for="miembros">Equipo del proyecto</label>
-                    <select class="form-select" id="miembros" name="miembros" multiple size="6">
+                    <label class="form-label">Equipo y rol en el proyecto</label>
+                    <div class="team-picker">
                         {% for persona in candidatos %}
-                        <option value="{{ persona.id }}" {% if persona.id in seleccionados %}selected{% endif %}>
-                            {{ persona.nombre }} · {{ 'Desarrollador' if persona.rol == 'desarrollador' else 'Cliente' }} · {{ persona.email }}
-                        </option>
+                        {% set rol_guardado = namespace(valor='Desarrollo') %}
+                        {% if proyecto %}
+                            {% for miembro in proyecto.miembros %}
+                                {% if miembro.usuario_id == persona.id %}
+                                    {% set rol_guardado.valor = miembro.rol_equipo %}
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                        <label class="team-picker-row">
+                            <input class="form-check-input mt-1" type="checkbox" name="miembros"
+                                   value="{{ persona.id }}" {% if persona.id in seleccionados %}checked{% endif %}>
+                            <span class="flex-grow-1">
+                                <span class="fw-semibold d-block">{{ persona.nombre }}</span>
+                                <span class="small text-secondary">{{ persona.email }}</span>
+                            </span>
+                            <input class="form-control form-control-sm team-role" type="text"
+                                   name="rol_miembro_{{ persona.id }}" maxlength="80"
+                                   aria-label="Rol de {{ persona.nombre }}"
+                                   value="{{ rol_guardado.valor }}" placeholder="Ej. QA, Frontend, Líder">
+                        </label>
                         {% endfor %}
-                    </select>
-                    <div class="form-text">Usa Ctrl (Windows) o Cmd (Mac) para seleccionar varias personas. Solo aparecen cuentas activas.</div>
+                        {% if not candidatos %}
+                        <p class="text-secondary mb-0">No hay cuentas activas disponibles para asignar.</p>
+                        {% endif %}
+                    </div>
+                    <div class="form-text">Selecciona a cada integrante y define su responsabilidad específica.</div>
                 </div>
             </div>
             <div class="d-flex gap-2 mt-4">

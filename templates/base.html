@@ -40,7 +40,20 @@
         .status-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: var(--olive); margin-right: .4rem; }
         .progress { background: #f1eddf; border-radius: 99px; height: .55rem; }
         .progress-bar { background: #d7bd54; border-radius: 99px; }
+        .team-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: .75rem; }
+        .team-picker-row { display: flex; align-items: flex-start; gap: .75rem; padding: 1rem; border: 1px solid var(--line); border-radius: 14px; cursor: pointer; }
+        .team-picker-row:has(.form-check-input:checked) { border-color: #d7c36e; background: #fffdf6; }
+        .team-role { max-width: 150px; }
+        .phase-card { padding: 1rem; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, #fff, #fffdf6); }
+        .phase-number { display: inline-grid; place-items: center; min-width: 2rem; height: 2rem; border-radius: 10px; background: var(--butter); color: var(--ink); font-size: .75rem; font-weight: 750; }
+        .project-objectives { max-width: 720px; padding: .9rem 1rem; border-left: 3px solid var(--butter-deep); border-radius: 0 12px 12px 0; background: #fffdf6; }
+        .task-card { transition: border-color .18s ease, box-shadow .18s ease; }
+        .task-card:hover { border-color: #ded3a7; box-shadow: 0 .4rem 1rem #3835220a; }
         footer { color: var(--muted) !important; }
+        @media (max-width: 575.98px) {
+            .team-picker-row { flex-wrap: wrap; }
+            .team-role { max-width: none; flex-basis: 100%; margin-left: 1.65rem; }
+        }
     </style>
 </head>
 <body>
